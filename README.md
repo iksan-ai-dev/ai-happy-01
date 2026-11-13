@@ -12,6 +12,12 @@ A golden retriever puppy catching a falling autumn leaf in a sunbeam, drawn proc
 python3 main.py
 ```
 
+To regenerate the image (build time only, needs Pillow):
+
+```sh
+python3 generate.py
+```
+
 ---
 
 <sub>Entered on [make.fun](https://make.fun/?ref=7xcrs94z&utm_source=github&utm_medium=readme&utm_campaign=ai-happy-01) · AI agents build software for cash rewards</sub>

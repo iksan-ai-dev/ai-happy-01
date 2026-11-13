@@ -1,8 +1,9 @@
 # generate.py — draws the ai-happy-01 entry image with Pillow (build time only).
 #
 # Art direction: a golden retriever puppy sitting in warm autumn light,
-# front paws raised, catching a falling maple leaf in a sunbeam. Flat
-# illustration, big central subject, warm palette, no text, no human faces.
+# both front paws raised beside its cheeks, catching a falling maple leaf
+# in a sunbeam. Flat illustration, big central subject, warm palette,
+# no text, no human faces, no stock photos — every pixel is drawn here.
 #
 # The grading runtime is standard-library only (no Pillow), so this script
 # runs here, at build time, and main.py only copies the finished PNG.
@@ -64,7 +65,7 @@ def ellipse_layer(cx, cy, rx, ry, fill, blur_r=0):
 
 
 def maple_leaf(size, color, vein=(120, 40, 20, 255)):
-    """A simple 5-lobed maple leaf, drawn pointing up, on its own RGBA tile."""
+    """A 5-lobed maple leaf, drawn pointing up, on its own RGBA tile."""
     w = h = size
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -87,11 +88,11 @@ def maple_leaf(size, color, vein=(120, 40, 20, 255)):
 
 
 def simple_leaf(size, color):
-    """A small pointed-oval leaf with a stem, pointing up."""
+    """A small lens-shaped leaf with a stem, pointing up."""
     w, h = size, int(size * 1.3)
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    # Lens-shaped leaf: two curved sides meeting at top and bottom points.
+    # Lens shape: two curved sides meeting at top and bottom points.
     pts = [(0.50, 0.02), (0.72, 0.18), (0.95, 0.45), (0.78, 0.72),
            (0.55, 0.96), (0.45, 0.96), (0.22, 0.72), (0.05, 0.45), (0.28, 0.18)]
     d.polygon([(x * w, y * h) for (x, y) in pts], fill=color + (255,))
@@ -165,7 +166,6 @@ def build():
     top = [(x, int(1560 - 60 * math.sin(math.pi * x / S))) for x in range(0, S + 1, 64)]
     md.polygon(top + [(S, S), (0, S)], fill=255)
     img.paste(ground, (0, 1500), hill_mask.crop((0, 1500, S, S)))
-    gd = ImageDraw.Draw(img)
     # soft hill shading
     img.alpha_composite(ellipse_layer(1024, 2050, 900, 180, (214, 120, 50, 70), blur_r=60))
 
@@ -261,13 +261,13 @@ def build():
             pd.arc([cx + dx - 20, cy - 30, cx + dx + 20, cy + 30], 300, 60, fill=BROWN + (200,), width=7)
 
     # ---- hero leaf, glowing, in the air above the paws ----
-    img.alpha_composite(ellipse_layer(1180, 620, 200, 200, (255, 150, 80, 70), blur_r=60))
+    img.alpha_composite(ellipse_layer(1210, 590, 200, 200, (255, 150, 80, 70), blur_r=60))
     hero = maple_leaf(380, LEAF_RED)
-    paste_rotated(img, hero, 1180, 620, -25)
+    paste_rotated(img, hero, 1210, 590, -25)
     # motion swoosh around the leaf
     md = ImageDraw.Draw(img)
-    md.arc([980, 400, 1400, 820], 300, 60, fill=(255, 255, 255, 150), width=12)
-    md.arc([1020, 460, 1360, 770], 300, 60, fill=(255, 255, 255, 100), width=9)
+    md.arc([1010, 370, 1430, 790], 300, 60, fill=(255, 255, 255, 150), width=12)
+    md.arc([1050, 430, 1390, 740], 300, 60, fill=(255, 255, 255, 100), width=9)
 
     # ---- scattered falling leaves ----
     for (cx, cy, size, col, ang) in [
