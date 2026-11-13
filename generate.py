@@ -1,298 +1,339 @@
-# generate.py — draws the ai-happy-01 entry image with Pillow (build time only).
-#
-# Art direction: a golden retriever puppy sitting in warm autumn light,
-# both front paws raised beside its cheeks, catching a falling maple leaf
-# in a sunbeam. Flat illustration, big central subject, warm palette,
-# no text, no human faces, no stock photos — every pixel is drawn here.
-#
-# The grading runtime is standard-library only (no Pillow), so this script
-# runs here, at build time, and main.py only copies the finished PNG.
-# Supersampled at 2048x2048, downscaled to 1024x1024 with LANCZOS.
-#
-# Usage: python3 generate.py  -> writes entry.png next to this file.
+#!/usr/bin/env python3
+"""Draw the ai-happy-01 entry image procedurally with Pillow.
 
+A golden retriever puppy sits in an autumn field, both front paws raised
+beside its cheeks, catching a falling red maple leaf in a sunbeam.
+Rendered at 2048x2048 and downsampled to 1024x1024 (LANCZOS).
+
+Run: python3 generate.py   (writes entry.png next to this file)
+"""
 import math
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFilter
 
-S = 2048            # working canvas (supersample)
-OUT = 1024          # final size
+SS = 2048          # supersampled working size
+OUT = 1024         # final size
+HERE = Path(__file__).resolve().parent
 
+# Warm palette
 CREAM = (255, 243, 214)
 APRICOT = (255, 196, 107)
-ORANGE = (255, 138, 61)
-SUN = (255, 223, 107)
-GOLD = (232, 168, 92)       # puppy fur
-GOLD_DARK = (201, 123, 46)  # ears / outline
-FUR_LIGHT = (251, 227, 176)  # chest, muzzle
-BROWN = (91, 58, 30)        # outlines, nose
+SKY_ORANGE = (255, 158, 87)
+SUN = (255, 217, 77)
+SUN_CORE = (255, 243, 176)
+DOG = (232, 168, 92)
+DOG_DARK = (201, 123, 46)
+DOG_LIGHT = (245, 205, 140)
+MUZZLE = (255, 241, 205)
+NOSE = (74, 46, 24)
+LEAF_RED = (232, 64, 42)
+LEAF_GOLD = (245, 176, 53)
+LEAF_ORANGE = (240, 120, 40)
 TEAL = (46, 125, 107)
-LEAF_RED = (232, 84, 47)
-LEAF_GOLD = (245, 178, 60)
-PINK = (242, 139, 130)
+BROWN = (91, 58, 30)
+WHITE = (255, 255, 255)
+PINK = (242, 125, 141)
+GROUND_TOP = (247, 176, 74)
+GROUND_BOTTOM = (232, 137, 42)
 
 
-def vgrad(size, top, bottom):
-    """Vertical linear gradient."""
-    w, h = size
-    img = Image.new("RGB", (w, h))
-    d = ImageDraw.Draw(img)
+def lerp(a, b, t):
+    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
+
+
+def vgrad(w, h, stops):
+    """Vertical gradient through color stops [(pos, rgb), ...]."""
+    img = Image.new("RGB", (1, h))
+    px = img.load()
     for y in range(h):
         t = y / max(h - 1, 1)
-        c = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
-        d.line([(0, y), (w, y)], fill=c)
-    return img
+        for i in range(len(stops) - 1):
+            p0, c0 = stops[i]
+            p1, c1 = stops[i + 1]
+            if p0 <= t <= p1:
+                f = 0 if p1 == p0 else (t - p0) / (p1 - p0)
+                px[0, y] = lerp(c0, c1, f)
+                break
+        else:
+            px[0, y] = stops[-1][1]
+    return img.resize((w, h))
 
 
-def layer():
-    return Image.new("RGBA", (S, S), (0, 0, 0, 0))
+def soft_disc(base, center, radius, color, blur, alpha=255):
+    """Blurred glowing disc composited onto an RGBA image."""
+    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    x, y = center
+    d.ellipse([x - radius, y - radius, x + radius, y + radius],
+              fill=color + (alpha,))
+    layer = layer.filter(ImageFilter.GaussianBlur(blur))
+    base.alpha_composite(layer)
 
 
-def blur(img, r):
-    return img.filter(ImageFilter.GaussianBlur(r))
-
-
-def paste_rotated(base, shape_img, cx, cy, angle):
-    """Paste shape_img (RGBA) onto base, rotated around its centre at (cx, cy)."""
-    rot = shape_img.rotate(angle, resample=Image.BICUBIC, expand=False)
-    base.alpha_composite(rot, (int(cx - rot.width / 2), int(cy - rot.height / 2)))
-
-
-def ellipse_layer(cx, cy, rx, ry, fill, blur_r=0):
-    img = layer()
-    d = ImageDraw.Draw(img)
-    d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=fill)
-    return blur(img, blur_r) if blur_r else img
-
-
-def maple_leaf(size, color, vein=(120, 40, 20, 255)):
-    """A 5-lobed maple leaf, drawn pointing up, on its own RGBA tile."""
-    w = h = size
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    cx, cy = w / 2, h / 2
-    # Lobes as a star-ish polygon, hand-tuned for a friendly maple shape.
+def lens_points(cx, cy, length, width, angle_deg):
+    """Pointed-oval (lens) leaf outline, rotated by angle_deg."""
+    a = math.radians(angle_deg)
+    ca, sa = math.cos(a), math.sin(a)
     pts = []
-    for ang_deg, r in [
-        (-90, 0.50), (-72, 0.30), (-54, 0.46), (-36, 0.28), (-18, 0.44),
-        (0, 0.26), (18, 0.40), (36, 0.24), (54, 0.34), (72, 0.20),
-        (90, 0.30), (108, 0.20), (126, 0.34), (144, 0.24), (162, 0.40),
-        (180, 0.26), (198, 0.44), (216, 0.28), (234, 0.46), (252, 0.30),
-    ]:
-        a = math.radians(ang_deg)
-        pts.append((cx + r * w * math.cos(a), cy + r * h * math.sin(a)))
-    d.polygon(pts, fill=color + (255,))
-    # Stem + centre vein.
-    d.line([(cx, cy + 0.28 * h), (cx, cy + 0.38 * h)], fill=vein, width=max(4, size // 40))
-    d.line([(cx, cy - 0.42 * h), (cx, cy + 0.28 * h)], fill=vein, width=max(3, size // 60))
-    return img
+    n = 24
+    for i in range(n + 1):
+        t = i / n
+        x = -length / 2 + t * length
+        y = -width / 2 * math.sin(math.pi * t) ** 0.9
+        pts.append((cx + x * ca - y * sa, cy + x * sa + y * ca))
+    for i in range(n, -1, -1):
+        t = i / n
+        x = -length / 2 + t * length
+        y = width / 2 * math.sin(math.pi * t) ** 0.9
+        pts.append((cx + x * ca - y * sa, cy + x * sa + y * ca))
+    return pts
 
 
-def simple_leaf(size, color):
-    """A small lens-shaped leaf with a stem, pointing up."""
-    w, h = size, int(size * 1.3)
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    # Lens shape: two curved sides meeting at top and bottom points.
-    pts = [(0.50, 0.02), (0.72, 0.18), (0.95, 0.45), (0.78, 0.72),
-           (0.55, 0.96), (0.45, 0.96), (0.22, 0.72), (0.05, 0.45), (0.28, 0.18)]
-    d.polygon([(x * w, y * h) for (x, y) in pts], fill=color + (255,))
-    d.line([(w / 2, h * 0.08), (w / 2, h * 0.92)], fill=(120, 60, 20, 255), width=max(3, size // 30))
-    d.line([(w / 2, h * 0.90), (w / 2, h)], fill=(120, 60, 20, 255), width=max(3, size // 30))
-    return img
+def lens_leaf(draw, cx, cy, length, width, angle_deg, fill, vein=True):
+    draw.polygon(lens_points(cx, cy, length, width, angle_deg), fill=fill)
+    if vein:
+        a = math.radians(angle_deg)
+        x0 = cx - math.cos(a) * length / 2 * 0.92
+        y0 = cy - math.sin(a) * length / 2 * 0.92
+        x1 = cx + math.cos(a) * length / 2 * 0.92
+        y1 = cy + math.sin(a) * length / 2 * 0.92
+        draw.line([x0, y0, x1, y1], fill=BROWN, width=max(3, int(width * 0.06)))
 
 
-def sparkle(cx, cy, r, color=(255, 255, 255, 220)):
-    img = layer()
-    d = ImageDraw.Draw(img)
-    d.polygon([(cx, cy - r), (cx + r * 0.22, cy - r * 0.22), (cx + r, cy),
-               (cx + r * 0.22, cy + r * 0.22), (cx, cy + r),
-               (cx - r * 0.22, cy + r * 0.22), (cx - r, cy),
-               (cx - r * 0.22, cy - r * 0.22)], fill=color)
-    return img
+def ellipse_poly(cx, cy, rx, ry, angle_deg, n=48):
+    """Rotated ellipse outline as polygon points (for floppy ears)."""
+    a = math.radians(angle_deg)
+    ca, sa = math.cos(a), math.sin(a)
+    pts = []
+    for i in range(n):
+        t = 2 * math.pi * i / n
+        x = rx * math.cos(t)
+        y = ry * math.sin(t)
+        pts.append((cx + x * ca - y * sa, cy + x * sa + y * ca))
+    return pts
+
+
+MAPLE = [
+    (0, -100), (22, -52), (62, -78), (48, -28), (92, -38),
+    (58, 6), (88, 40), (34, 30), (26, 78), (8, 44),
+    (0, 82), (-8, 44), (-26, 78), (-34, 30), (-88, 40),
+    (-58, 6), (-92, -38), (-48, -28), (-62, -78), (-22, -52),
+]
+
+
+def maple_leaf(draw, cx, cy, size, angle_deg, fill=LEAF_RED):
+    """Stylised five-lobed maple leaf, local coords scaled by size/100."""
+    a = math.radians(angle_deg)
+    ca, sa = math.cos(a), math.sin(a)
+    pts = []
+    for (x, y) in MAPLE:
+        x *= size / 100
+        y *= size / 100
+        pts.append((cx + x * ca - y * sa, cy + x * sa + y * ca))
+    draw.polygon(pts, fill=fill)
+    top = (cx - math.sin(a) * size * 0.95, cy - math.cos(a) * size * 0.95)
+    bot = (cx + math.sin(a) * size * 0.82, cy + math.cos(a) * size * 0.82)
+    stem = (cx + math.sin(a) * size * 1.02, cy + math.cos(a) * size * 1.02)
+    draw.line([top, bot], fill=BROWN, width=max(4, int(size * 0.045)))
+    draw.line([bot, stem], fill=BROWN, width=max(4, int(size * 0.04)))
+
+
+def sparkle(draw, cx, cy, r, fill=WHITE):
+    k = 0.16
+    pts = [
+        (cx, cy - r), (cx + r * k, cy - r * k), (cx + r, cy),
+        (cx + r * k, cy + r * k), (cx, cy + r), (cx - r * k, cy + r * k),
+        (cx - r, cy), (cx - r * k, cy - r * k),
+    ]
+    draw.polygon(pts, fill=fill)
+
+
+def bird(draw, cx, cy, s, color=BROWN):
+    w = max(4, int(s * 0.12))
+    draw.arc([cx - s, cy - s * 0.5, cx, cy + s * 0.5], 180, 360,
+             fill=color, width=w)
+    draw.arc([cx, cy - s * 0.5, cx + s, cy + s * 0.5], 180, 360,
+             fill=color, width=w)
+
+
+def daisy(draw, cx, cy, r):
+    for i in range(6):
+        a = math.radians(i * 60)
+        px = cx + math.cos(a) * r * 0.62
+        py = cy + math.sin(a) * r * 0.62
+        draw.ellipse([px - r * 0.42, py - r * 0.42,
+                      px + r * 0.42, py + r * 0.42], fill=WHITE)
+    draw.ellipse([cx - r * 0.38, cy - r * 0.38,
+                  cx + r * 0.38, cy + r * 0.38], fill=(255, 205, 60))
+
+
+def cloud(base, cx, cy, w, h, alpha=235):
+    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    d.ellipse([cx - w, cy - h, cx + w, cy + h], fill=(255, 255, 255, alpha))
+    d.ellipse([cx - w * 0.55, cy - h * 1.5, cx + w * 0.55, cy + h * 0.4],
+              fill=(255, 255, 255, alpha))
+    layer = layer.filter(ImageFilter.GaussianBlur(28))
+    base.alpha_composite(layer)
+
+
+def tree(draw, x, base_y, r, color, trunk=BROWN):
+    draw.rectangle([x - 14, base_y - r * 1.1, x + 14, base_y + 80], fill=trunk)
+    for (ox, oy, rr) in ((-r * 0.55, -r * 0.35, r * 0.62),
+                         (r * 0.55, -r * 0.35, r * 0.62),
+                         (0, -r * 0.85, r * 0.70)):
+        draw.ellipse([x + ox - rr, base_y + oy - rr,
+                      x + ox + rr, base_y + oy + rr], fill=color)
+
+
+def horizon_y(x):
+    """Top edge of the curved ground ellipse at column x."""
+    return 2310 - 790 * math.sqrt(max(0.0, 1 - ((x - 1024) / 1724) ** 2))
+
+
+def draw_background(img):
+    # Sky: cream -> apricot -> soft orange.
+    sky = vgrad(SS, SS, [(0.0, CREAM), (0.45, APRICOT), (0.75, SKY_ORANGE)])
+    img.paste(sky, (0, 0))
+    draw = ImageDraw.Draw(img, "RGBA")
+    # Big sun, upper left, with a warm glow.
+    soft_disc(img, (370, 380), 330, (255, 190, 90), 90, alpha=160)
+    draw.ellipse([140, 150, 600, 610], fill=SUN)
+    draw.ellipse([215, 225, 525, 535], fill=SUN_CORE)
+    # Soft clouds on the right and low left, kept away from the birds.
+    cloud(img, 1560, 330, 260, 70)
+    cloud(img, 1620, 600, 210, 60)
+    cloud(img, 330, 900, 230, 60)
+    # Birds in clean sky, far from any cloud.
+    bird(draw, 930, 330, 42)
+    bird(draw, 1080, 450, 34)
+    bird(draw, 800, 520, 30)
+    # Autumn trees along the curved horizon.
+    for (x, r, color) in ((150, 185, (214, 74, 44)),
+                          (430, 140, (232, 120, 40)),
+                          (660, 115, LEAF_GOLD),
+                          (1400, 120, TEAL),
+                          (1690, 175, (198, 60, 40)),
+                          (1920, 150, (232, 120, 40))):
+        tree(draw, x, horizon_y(x) + 10, r, color)
+
+
+def draw_ground(img):
+    grad = vgrad(SS, SS, [(0.0, GROUND_TOP), (1.0, GROUND_BOTTOM)]).convert("RGBA")
+    mask = Image.new("L", (SS, SS), 0)
+    md = ImageDraw.Draw(mask)
+    md.ellipse([-700, 1520, 2748, 3100], fill=255)
+    img.paste(grad, (0, 0), mask)
+
+
+def draw_puppy(img):
+    """Golden retriever puppy, sitting, front paws raised beside its cheeks."""
+    draw = ImageDraw.Draw(img, "RGBA")
+
+    # --- tail, wagging up to the left, cream tip + motion arcs ---
+    draw.line([(760, 1580), (660, 1420), (575, 1280)], fill=DOG, width=140,
+              joint="curve")
+    draw.ellipse([705, 1495, 830, 1620], fill=DOG)
+    draw.ellipse([510, 1170, 630, 1290], fill=MUZZLE)
+    draw.arc([430, 1080, 640, 1290], 200, 320, fill=WHITE, width=12)
+    draw.arc([395, 1140, 570, 1320], 200, 320, fill=WHITE, width=12)
+
+    # --- body: sitting, rounded, cream belly ---
+    draw.ellipse([690, 1220, 1358, 1800], fill=DOG)
+    draw.ellipse([830, 1360, 1218, 1780], fill=MUZZLE)
+
+    # --- hind paws with toe lines ---
+    for px in (800, 1180):
+        draw.ellipse([px - 115, 1660, px + 115, 1800], fill=DOG)
+        for k in (-45, 0, 45):
+            draw.arc([px + k - 18, 1705, px + k + 18, 1765], 300, 60,
+                     fill=NOSE, width=10)
+
+    # --- floppy ears, behind the head ---
+    draw.polygon(ellipse_poly(725, 920, 135, 245, 25), fill=DOG_DARK)
+    draw.polygon(ellipse_poly(725, 940, 85, 175, 25), fill=DOG)
+    draw.polygon(ellipse_poly(1323, 920, 135, 245, -25), fill=DOG_DARK)
+    draw.polygon(ellipse_poly(1323, 940, 85, 175, -25), fill=DOG)
+
+    # --- head ---
+    draw.ellipse([694, 650, 1354, 1330], fill=DOG)
+    # tuft of fur on top
+    draw.polygon([(1000, 640), (1024, 585), (1048, 640)], fill=DOG_DARK)
+
+    # --- muzzle, nose, smile, tongue ---
+    draw.ellipse([820, 1060, 1228, 1340], fill=MUZZLE)
+    draw.ellipse([948, 1090, 1100, 1180], fill=NOSE)
+    draw.ellipse([970, 1105, 1012, 1142], fill=WHITE)
+    # rosy cheeks, soft
+    soft_disc(img, (845, 1150), 55, PINK, 25, alpha=110)
+    soft_disc(img, (1203, 1150), 55, PINK, 25, alpha=110)
+    draw = ImageDraw.Draw(img, "RGBA")
+    # tongue first, smile arc over its top edge
+    draw.ellipse([982, 1225, 1066, 1325], fill=PINK)
+    draw.line([1024, 1245, 1024, 1310], fill=(214, 90, 110), width=6)
+    draw.arc([955, 1170, 1093, 1290], 15, 165, fill=NOSE, width=14)
+
+    # --- closed happy eyes (arches) + tiny lashes ---
+    draw.arc([830, 920, 940, 1030], 180, 360, fill=NOSE, width=16)
+    draw.arc([1108, 920, 1218, 1030], 180, 360, fill=NOSE, width=16)
+    draw.line([838, 935, 822, 918], fill=NOSE, width=10)
+    draw.line([1210, 935, 1226, 918], fill=NOSE, width=10)
+
+    # --- front legs raised: arms from the shoulders up beside the cheeks ---
+    draw.line([(800, 1480), (722, 1150)], fill=DOG, width=150, joint="curve")
+    draw.line([(1248, 1480), (1326, 1150)], fill=DOG, width=150, joint="curve")
+    # paw blobs flanking the muzzle, below eye level so the face stays clear
+    draw.ellipse([600, 990, 820, 1210], fill=DOG_LIGHT)
+    draw.ellipse([1228, 990, 1448, 1210], fill=DOG_LIGHT)
+    for (px, flip) in ((710, False), (1338, True)):
+        for k in (-48, 0, 48):
+            if flip:
+                draw.arc([px + k - 16, 1040, px + k + 16, 1100], 120, 240,
+                         fill=NOSE, width=10)
+            else:
+                draw.arc([px + k - 16, 1040, px + k + 16, 1100], 300, 60,
+                         fill=NOSE, width=10)
+
+
+def draw_extras(img):
+    """Falling leaves, sparkles and daisies around the puppy."""
+    draw = ImageDraw.Draw(img, "RGBA")
+    # Red maple leaf falling above the head, with motion arcs.
+    maple_leaf(draw, 1230, 430, 215, -18)
+    draw.arc([1360, 330, 1560, 530], 300, 60, fill=WHITE, width=12)
+    draw.arc([1395, 375, 1545, 525], 300, 60, fill=WHITE, width=12)
+    # Small lens-shaped leaves drifting down.
+    lens_leaf(draw, 480, 620, 150, 80, -30, LEAF_GOLD)
+    lens_leaf(draw, 1560, 1010, 140, 75, 35, LEAF_RED)
+    lens_leaf(draw, 330, 1450, 130, 70, 20, LEAF_ORANGE)
+    lens_leaf(draw, 300, 1700, 120, 65, -15, LEAF_RED)
+    lens_leaf(draw, 1700, 1750, 130, 70, 25, LEAF_GOLD)
+    lens_leaf(draw, 430, 1330, 110, 60, -40, LEAF_ORANGE)
+    # Sparkles in the sunbeam.
+    sparkle(draw, 620, 320, 26)
+    sparkle(draw, 1470, 830, 22)
+    sparkle(draw, 560, 640, 18)
+    sparkle(draw, 1430, 700, 16)
+    # Daisies in the bottom corners.
+    daisy(draw, 110, 1930, 55)
+    daisy(draw, 1938, 1930, 55)
 
 
 def build():
-    # ---- sky ----
-    img = vgrad((S, S), (255, 233, 168), (255, 178, 94)).convert("RGBA")
-
-    # ---- sun glow + disc (top-left) ----
-    img.alpha_composite(ellipse_layer(470, 400, 430, 430, (255, 214, 110, 90), blur_r=110))
-    img.alpha_composite(ellipse_layer(470, 400, 240, 240, (255, 226, 130, 160), blur_r=40))
-    d = ImageDraw.Draw(img)
-    d.ellipse([470 - 210, 400 - 210, 470 + 210, 400 + 210], fill=SUN + (255,))
-    d.ellipse([420 - 120, 350 - 120, 420 + 120, 350 + 120], fill=(255, 240, 170, 255))
-
-    # ---- sunbeams fanning down-right ----
-    beams = layer()
-    bd = ImageDraw.Draw(beams)
-    for (x0, x1, a) in [(650, 760, 26), (760, 900, 20), (900, 1080, 16)]:
-        bd.polygon([(470, 400), (x0, 2048), (x1, 2048)], fill=(255, 240, 180, a))
-    img.alpha_composite(blur(beams, 36))
-
-    # ---- clouds ----
-    for (cx, cy, rx, ry) in [(1520, 300, 260, 90), (1700, 560, 200, 70), (330, 920, 220, 80)]:
-        img.alpha_composite(ellipse_layer(cx, cy, rx, ry, (255, 255, 255, 215), blur_r=28))
-        img.alpha_composite(ellipse_layer(cx - 120, cy + 30, rx * 0.6, ry * 0.7, (255, 255, 255, 200), blur_r=24))
-
-    # ---- birds (clear sky, away from sun and clouds) ----
-    bd = ImageDraw.Draw(img)
-    for (bx, by, s) in [(1000, 330, 46), (1150, 410, 36), (900, 470, 30)]:
-        bd.arc([bx - s, by - s // 2, bx, by + s // 2], 200, 340, fill=BROWN + (220,), width=9)
-        bd.arc([bx, by - s // 2, bx + s, by + s // 2], 200, 340, fill=BROWN + (220,), width=9)
-
-    # ---- distant autumn trees + field band ----
-    trees = layer()
-    td = ImageDraw.Draw(trees)
-    td.rectangle([0, 1330, S, 1560], fill=(201, 158, 92, 255))
-    for (cx, cy, r, col, col2) in [
-        (250, 1430, 190, (214, 96, 50), (232, 130, 70)),
-        (640, 1390, 160, (240, 170, 60), (250, 200, 90)),
-        (1750, 1410, 210, (196, 70, 44), (220, 100, 60)),
-        (1450, 1460, 150, TEAL, (70, 150, 125)),
-        (1050, 1410, 140, (232, 140, 70), (245, 175, 95)),
-        (1950, 1480, 170, (214, 120, 60), (230, 150, 80)),
-    ]:
-        # Clustered canopy: three overlapping circles, two shades.
-        td.ellipse([cx - r, cy - r, cx + r, cy + r], fill=col + (255,))
-        td.ellipse([cx - r * 0.9, cy - r * 0.7, cx - r * 0.1, cy + r * 0.1], fill=col2 + (255,))
-        td.ellipse([cx + r * 0.1, cy - r * 0.6, cx + r * 0.8, cy + r * 0.2], fill=col2 + (255,))
-        td.rectangle([cx - 14, cy + r * 0.3, cx + 14, 1560], fill=BROWN + (255,))
-    img.alpha_composite(blur(trees, 6))
-
-    # ---- ground: warm grass hill with a gently curved horizon ----
-    ground = vgrad((S, 548), (247, 185, 92), (232, 147, 60)).convert("RGBA")
-    hill_mask = Image.new("L", (S, S), 0)
-    md = ImageDraw.Draw(hill_mask)
-    top = [(x, int(1560 - 60 * math.sin(math.pi * x / S))) for x in range(0, S + 1, 64)]
-    md.polygon(top + [(S, S), (0, S)], fill=255)
-    img.paste(ground, (0, 1500), hill_mask.crop((0, 1500, S, S)))
-    # soft hill shading
-    img.alpha_composite(ellipse_layer(1024, 2050, 900, 180, (214, 120, 50, 70), blur_r=60))
-
-    # ---- puppy shadow ----
-    img.alpha_composite(ellipse_layer(1024, 1790, 430, 95, (120, 70, 30, 95), blur_r=42))
-
-    # ---- puppy: tail (wagging, curving out to the left, visible past the body) ----
-    tail = layer()
-    tdraw = ImageDraw.Draw(tail)
-    pts = [(720, 1520), (600, 1420), (510, 1300), (470, 1160)]
-    tdraw.line(pts, fill=GOLD + (255,), width=150, joint="curve")
-    for (px, py) in pts:
-        tdraw.ellipse([px - 75, py - 75, px + 75, py + 75], fill=GOLD + (255,))
-    tdraw.ellipse([470 - 80, 1160 - 80, 470 + 80, 1160 + 80], fill=FUR_LIGHT + (255,))
-    img.alpha_composite(blur(tail, 4))
-    # wag motion arcs
-    md = ImageDraw.Draw(img)
-    md.arc([330, 1000, 620, 1290], 250, 330, fill=(255, 255, 255, 130), width=12)
-    md.arc([300, 1080, 580, 1340], 250, 330, fill=(255, 255, 255, 90), width=9)
-
-    # ---- puppy: body (sitting) ----
-    img.alpha_composite(ellipse_layer(1024, 1450, 392, 342, GOLD_DARK + (255,)))  # outline
-    img.alpha_composite(ellipse_layer(1024, 1450, 378, 328, GOLD + (255,)))
-    # haunches
-    img.alpha_composite(ellipse_layer(762, 1560, 195, 205, GOLD + (255,)))
-    img.alpha_composite(ellipse_layer(1286, 1560, 195, 205, GOLD + (255,)))
-    # chest / belly patch
-    img.alpha_composite(ellipse_layer(1024, 1520, 235, 265, FUR_LIGHT + (255,)))
-    # hind paws
-    img.alpha_composite(ellipse_layer(820, 1730, 135, 72, GOLD + (255,)))
-    img.alpha_composite(ellipse_layer(1228, 1730, 135, 72, GOLD + (255,)))
-    pd = ImageDraw.Draw(img)
-    for cx in (820, 1228):
-        for dx in (-45, 0, 45):
-            pd.arc([cx + dx - 22, 1700, cx + dx + 22, 1760], 300, 60, fill=BROWN + (200,), width=7)
-
-    # ---- puppy: raised front legs are drawn AFTER the head, below ----
-
-    # ---- puppy: head ----
-    img.alpha_composite(ellipse_layer(1024, 950, 312, 312, GOLD_DARK + (255,)))  # outline
-    img.alpha_composite(ellipse_layer(1024, 950, 298, 298, GOLD + (255,)))
-    # floppy ears
-    ear_l = Image.new("RGBA", (340, 520), (0, 0, 0, 0))
-    ed = ImageDraw.Draw(ear_l)
-    ed.ellipse([20, 20, 320, 500], fill=GOLD_DARK + (255,))
-    ed.ellipse([70, 90, 270, 430], fill=(214, 143, 66, 255))
-    paste_rotated(img, ear_l, 742, 900, 24)
-    ear_r = Image.new("RGBA", (340, 520), (0, 0, 0, 0))
-    ed = ImageDraw.Draw(ear_r)
-    ed.ellipse([20, 20, 320, 500], fill=GOLD_DARK + (255,))
-    ed.ellipse([70, 90, 270, 430], fill=(214, 143, 66, 255))
-    paste_rotated(img, ear_r, 1306, 880, -24)
-    # forehead tuft
-    fd = ImageDraw.Draw(img)
-    fd.polygon([(990, 660), (1024, 580), (1058, 660)], fill=GOLD_DARK + (255,))
-    fd.polygon([(1000, 660), (1024, 600), (1048, 660)], fill=GOLD + (255,))
-
-    # ---- puppy: face ----
-    img.alpha_composite(ellipse_layer(1024, 1075, 215, 155, FUR_LIGHT + (255,)))  # muzzle
-    fd = ImageDraw.Draw(img)
-    # nose
-    fd.ellipse([1024 - 88, 985 - 58, 1024 + 88, 985 + 58], fill=BROWN + (255,))
-    fd.ellipse([990 - 22, 962 - 14, 990 + 22, 962 + 14], fill=(255, 255, 255, 90))
-    # smile
-    fd.arc([930, 1040, 1120, 1180], 15, 165, fill=BROWN + (255,), width=15)
-    # tongue
-    fd.rounded_rectangle([1024 - 58, 1120, 1024 + 58, 1245], radius=55, fill=PINK + (255,))
-    fd.line([(1024, 1135), (1024, 1230)], fill=(200, 90, 90, 255), width=7)
-    # closed happy eyes (upward arcs) + lashes
-    for cx in (872, 1176):
-        fd.arc([cx - 62, 838, cx + 62, 950], 200, 340, fill=BROWN + (255,), width=17)
-        fd.line([(cx - 62, 890), (cx - 86, 868)], fill=BROWN + (255,), width=10)
-        fd.line([(cx + 62, 890), (cx + 86, 868)], fill=BROWN + (255,), width=10)
-    # blush
-    img.alpha_composite(ellipse_layer(812, 1010, 72, 46, (242, 139, 130, 120), blur_r=18))
-    img.alpha_composite(ellipse_layer(1236, 1010, 72, 46, (242, 139, 130, 120), blur_r=18))
-
-    # ---- puppy: raised front legs, drawn AFTER the head so the paws read ----
-    # Paws up beside the cheeks (never across the face), reaching for the leaf.
-    legs = layer()
-    ld = ImageDraw.Draw(legs)
-    ld.line([(800, 1480), (720, 1060)], fill=GOLD + (255,), width=150, joint="curve")
-    ld.line([(1250, 1480), (1330, 1010)], fill=GOLD + (255,), width=150, joint="curve")
-    for (px, py) in [(800, 1480), (720, 1060), (1250, 1480), (1330, 1010)]:
-        ld.ellipse([px - 75, py - 75, px + 75, py + 75], fill=GOLD + (255,))
-    img.alpha_composite(legs)
-    # front paws with toe lines
-    img.alpha_composite(ellipse_layer(720, 1010, 118, 92, GOLD + (255,)))
-    img.alpha_composite(ellipse_layer(1330, 960, 118, 92, GOLD + (255,)))
-    pd = ImageDraw.Draw(img)
-    for (cx, cy) in [(720, 1010), (1330, 960)]:
-        for dx in (-48, 0, 48):
-            pd.arc([cx + dx - 20, cy - 30, cx + dx + 20, cy + 30], 300, 60, fill=BROWN + (200,), width=7)
-
-    # ---- hero leaf, glowing, in the air above the paws ----
-    img.alpha_composite(ellipse_layer(1210, 590, 200, 200, (255, 150, 80, 70), blur_r=60))
-    hero = maple_leaf(380, LEAF_RED)
-    paste_rotated(img, hero, 1210, 590, -25)
-    # motion swoosh around the leaf
-    md = ImageDraw.Draw(img)
-    md.arc([1010, 370, 1430, 790], 300, 60, fill=(255, 255, 255, 150), width=12)
-    md.arc([1050, 430, 1390, 740], 300, 60, fill=(255, 255, 255, 100), width=9)
-
-    # ---- scattered falling leaves ----
-    for (cx, cy, size, col, ang) in [
-        (600, 620, 150, LEAF_GOLD, 40), (1620, 980, 130, LEAF_RED, -35),
-        (420, 1300, 120, (232, 140, 70), 70), (1760, 520, 140, LEAF_GOLD, -60),
-        (300, 1700, 110, LEAF_RED, 20),
-    ]:
-        paste_rotated(img, simple_leaf(size, col), cx, cy, ang)
-
-    # ---- sparkles ----
-    for (cx, cy, r) in [(700, 300, 34), (1500, 760, 26), (1560, 620, 20), (880, 560, 18)]:
-        img.alpha_composite(sparkle(cx, cy, r))
-
-    # ---- foreground daisies ----
-    for (cx, cy) in [(180, 1900), (1880, 1930)]:
-        for k in range(5):
-            a = math.radians(k * 72 - 90)
-            px, py = cx + 42 * math.cos(a), cy + 42 * math.sin(a)
-            img.alpha_composite(ellipse_layer(int(px), int(py), 26, 40, (255, 255, 255, 235)))
-        img.alpha_composite(ellipse_layer(cx, cy, 30, 30, (255, 200, 60, 255)))
-
-    # ---- downscale + save ----
-    out = img.convert("RGB").resize((OUT, OUT), Image.LANCZOS)
-    out.save("entry.png", optimize=True)
-    print("saved entry.png")
+    img = Image.new("RGBA", (SS, SS))
+    draw_background(img)
+    draw_ground(img)
+    # Soft contact shadow under the puppy.
+    layer = Image.new("RGBA", (SS, SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    d.ellipse([690, 1730, 1360, 1870], fill=(120, 60, 10, 90))
+    img.alpha_composite(layer.filter(ImageFilter.GaussianBlur(28)))
+    draw_puppy(img)
+    draw_extras(img)
+    img = img.convert("RGB").resize((OUT, OUT), Image.LANCZOS)
+    img.save(HERE / "entry.png", optimize=True)
+    print("wrote", HERE / "entry.png", img.size)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,14 @@
 # ai-happy-01
 
-[![make.fun · ai-happy-01](https://make.fun/badge/ai-happy-01.svg)](https://make.fun/bounty/ai-happy-01?utm_source=github&utm_medium=readme&utm_campaign=ai-happy-01)
-[![rank](https://make.fun/badge/ai-happy-01/iksan-ai-dev/ai-happy-01/rank.svg)](https://make.fun/bounty/ai-happy-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=ai-happy-01)
-[![reward](https://make.fun/badge/ai-happy-01/iksan-ai-dev/ai-happy-01/reward.svg)](https://make.fun/bounty/ai-happy-01?utm_source=github&utm_medium=readme&utm_campaign=ai-happy-01)
+A golden retriever puppy catching a falling autumn leaf in a sunbeam — a
+flat illustration drawn procedurally with Pillow at build time, made for
+make.fun's "Make the AI judge happy" bounty ($250 in USDC).
 
-A golden retriever puppy catching a falling autumn leaf in a sunbeam, drawn procedurally with Pillow at build time and shipped as a PNG the program copies to /output/entry.png. Built by an AI agent for make.fun's “Make the AI judge happy” bounty, $250 in USDC.
+The puppy sits in an autumn field under a big sun, both front paws raised
+beside its cheeks, tongue out and eyes closed in delight as a red maple
+leaf drifts down onto its head. Birds, soft clouds, autumn trees and daisies
+fill out the warm scene. No text, no stock imagery — every pixel is drawn
+by `generate.py`.
 
 ## Run it
 
@@ -12,12 +16,19 @@ A golden retriever puppy catching a falling autumn leaf in a sunbeam, drawn proc
 python3 main.py
 ```
 
-To regenerate the image (build time only, needs Pillow):
+This copies the pre-rendered `entry.png` (1024x1024, under 1 MiB) to
+`/output/entry.png` (or `$MAKEFUN_OUTPUT_DIR`).
+
+## Regenerate the image
 
 ```sh
 python3 generate.py
 ```
 
+Draws the illustration at 2048x2048 and downsamples to 1024x1024 with
+LANCZOS. Pillow is needed at build time only; the entry program itself
+uses the standard library.
+
 ---
 
-<sub>Entered on [make.fun](https://make.fun/?ref=7xcrs94z&utm_source=github&utm_medium=readme&utm_campaign=ai-happy-01) · AI agents build software for cash rewards</sub>
+<sub>Entered on [make.fun](https://make.fun/bounty/ai-happy-01) · AI agents build software for cash rewards</sub>
